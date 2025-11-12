@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="da">
+<head>
+<meta charset="utf-8" />
+<title>Mini-Doom (raycaster demo)</title>
+<style>
+  html,body { height:100%; margin:0; background:#222; display:flex; align-items:center; justify-content:center; }
+  canvas { background: #7ec0ee; image-rendering: pixelated; }
+  #ui { position: absolute; top:10px; left:10px; color:#fff; font-family:sans-serif; }
+</style>
+</head>
+<body>
+<div id="ui">W/S frem/tilbage, A/D drej, Q/E strafe</div>
+<canvas id="c" width="800" height="480"></canvas>
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+
+const MAP = [
+  [1,1,1,1,1,1,1,1,1,1],
+  [1,0,0,0,0,0,0,0,0,1],
+  [1,0,0,0,2,0,0,0,0,1],
+  [1,0,0,0,0,0,0,0,0,1],
+  [1,0,0,0,0,0,0,3,0,1],
+  [1,0,0,0,0,0,0,0,0,1],
+  [1,0,0,0,0,0,0,0,0,1],
+  [1,0,0,0,0,0,0,0,0,1],
+  [1,0,0,0,0,0,0,0,0,1],
+  [1,1,1,1,1,1,1,1,1,1],
+];
+const TILE = 1; // hver celle er 1 enhed
+const FOV = Math.PI / 3; // 60 grader
+const NUM_RAYS = canvas.width; // én stråle per pixel for simplicity
+const MAX_DIST = 20;
+let player = { x: 4.5, y: 5.5, angle: 0, speed: 0.05 };
+
+const keys = {};
+window.addEventListener('keydown', e => keys[e.key.toLowerCase()] = true);
+window.addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
+
+function inMap(x,y){
+  const mx = Math.floor(x), my = Math.floor(y);
+  return my>=0 && my<MAP.length && mx>=0 && mx<MAP[0].length;
+}
+function mapAt(x,y){
+  if(!inMap(x,y)) return 1;
+  return MAP[Math.floor(y)][Math.floor(x)];
+}
+
+function update(){
+  // bevægelse: W,S frem/tilbage, A/D drej, Q/E strafe
+  if(keys['w']) {
+    const nx = player.x + Math.cos(player.angle)*player.speed;
+    const ny = player.y + Math.sin(player.angle)*player.speed;
+    if(mapAt(nx, ny) === 0){ player.x = nx; player.y = ny; }
+  }
+  if(keys['s']) {
+    const nx = player.x - Math.cos(player.angle)*player.speed;
+    const ny = player.y - Math.sin(player.angle)*player.speed;
+    if(mapAt(nx, ny) === 0){ player.x = nx; player.y = ny; }
+  }
+  if(keys['a']) player.angle -= 0.04;
+  if(keys['d']) player.angle += 0.04;
+  if(keys['q']) { // strafe left
+    const nx = player.x - Math.sin(player.angle)*player.speed;
+    const ny = player.y + Math.cos(player.angle)*player.speed;
+    if(mapAt(nx, ny) === 0){ player.x = nx; player.y = ny; }
+  }
+  if(keys['e']) { // strafe right
+    const nx = player.x + Math.sin(player.angle)*player.speed;
+    const ny = player.y - Math.cos(player.angle)*player.speed;
+    if(mapAt(nx, ny) === 0){ player.x = nx; player.y = ny; }
+  }
+}
+
+function castRays(){
+  const halfH = canvas.height/2;
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+
+  // himmel og gulv
+  ctx.fillStyle = '#87CEEB'; ctx.fillRect(0,0,canvas.width,halfH); // himmel
+  ctx.fillStyle = '#777'; ctx.fillRect(0,halfH,canvas.width,halfH); // gulv
+
+  for(let col=0; col<NUM_RAYS; col++){
+    const rayScreenPos = (col / NUM_RAYS) - 0.5;
+    const rayAngle = player.angle + rayScreenPos * FOV;
+
+    // simpel ray march (stepping)
+    let dist = 0;
+    let hit = false;
+    let hitVal = 0;
+    while(!hit && dist < MAX_DIST){
+      dist += 0.02; // step størrelse (mindre = mere præcis, langsommere)
+      const rx = player.x + Math.cos(rayAngle) * dist;
+      const ry = player.y + Math.sin(rayAngle) * dist;
+      const cell = mapAt(rx, ry);
+      if(cell !== 0){
+        hit = true;
+        hitVal = cell;
+      }
+    }
+    if(!hit) continue;
+    // korriger fisheye
+    const correctedDist = dist * Math.cos(rayAngle - player.angle);
+    const projHeight = Math.min(canvas.height, (canvas.height * 0.8) / (correctedDist || 0.001));
+
+    // farve baseret på væg-type og afstand
+    let shade = Math.max(0, 1 - correctedDist/8);
+    let baseColor = hitVal === 1 ? [200,120,80] : hitVal===2 ? [120,200,120] : [180,180,240];
+    const r = Math.floor(baseColor[0]*shade), g=Math.floor(baseColor[1]*shade), b=Math.floor(baseColor[2]*shade);
+
+    ctx.fillStyle = `rgb(${r},${g},${b})`;
+    ctx.fillRect(col, halfH - projHeight/2, 1, projHeight);
+  }
+
+  // mini-map (til venstre top)
+  const mmScale = 12;
+  ctx.fillStyle = 'rgba(0,0,0,0.6)';
+  ctx.fillRect(10,10, MAP[0].length*mmScale + 6, MAP.length*mmScale + 6);
+  for(let y=0;y<MAP.length;y++){
+    for(let x=0;x<MAP[0].length;x++){
+      if(MAP[y][x] === 0) ctx.fillStyle = '#222';
+      else if(MAP[y][x]===1) ctx.fillStyle = '#aaa';
+      else if(MAP[y][x]===2) ctx.fillStyle = '#0f0';
+      else ctx.fillStyle = '#f0f';
+      ctx.fillRect(13 + x*mmScale, 13 + y*mmScale, mmScale-1, mmScale-1);
+    }
+  }
+  // player på mini-map
+  ctx.fillStyle = 'yellow';
+  ctx.fillRect(13 + player.x*mmScale -2, 13 + player.y*mmScale -2, 4,4);
+  // retning linje
+  ctx.strokeStyle = 'yellow'; ctx.beginPath();
+  ctx.moveTo(13 + player.x*mmScale, 13 + player.y*mmScale);
+  ctx.lineTo(13 + (player.x + Math.cos(player.angle)*0.8)*mmScale, 13 + (player.y + Math.sin(player.angle)*0.8)*mmScale);
+  ctx.stroke();
+}
+
+function loop(){
+  update();
+  castRays();
+  requestAnimationFrame(loop);
+}
+
+loop();
+</script>
+</body>
+</html>
